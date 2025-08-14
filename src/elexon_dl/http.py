@@ -1,10 +1,19 @@
-import asyncio, random, time
-from typing import Any, Dict, Optional
+import asyncio, random, time, json, hashlib
+from typing import Any, Dict, Optional, Tuple
 from collections import deque
+from pathlib import Path
 import httpx
 from .config import Settings
 
 RETRIABLE = {429, 500, 502, 503, 504}
+
+def _now() -> float:
+    return time.time()
+
+def _cache_key(url: str, params: Dict[str, Any]) -> str:
+    # stable key from url + sorted params
+    payload = json.dumps([url, sorted(params.items())], separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()  # 40 hex
 
 class RateLimiter:
     def __init__(self, rate_per_sec: float, capacity: Optional[float] = None):
@@ -54,16 +63,25 @@ class AsyncHTTP:
         self._client: Optional[httpx.AsyncClient] = None
         self._limiter = RateLimiter(self.s.rate_per_sec)
         self.metrics = HTTPMetrics()
+        # NEW: cache filesystem prep
+        self._cache_dir: Optional[Path] = None
+        if self.s.cache_enabled:
+            d = Path(self.s.cache_dir or (Path.home() / ".cache" / "elexon-dl" / "http"))
+            d.mkdir(parents=True, exist_ok=True)
+            self._cache_dir = d
+        # convenience
+        self._ttl = None if not self.s.cache_ttl_s or self.s.cache_ttl_s <= 0 else int(self.s.cache_ttl_s)
 
     async def __aenter__(self):
         headers = {"User-Agent": self.s.user_agent}
-        if self.s.cache_enabled:
-            headers["Cache-Control"] = "no-cache"
+        # do NOT set no-cache; you want caches to be usable
         self._client = httpx.AsyncClient(
             timeout=self.s.timeout_s,
             headers=headers,
-            limits=httpx.Limits(max_keepalive_connections=self.s.max_concurrency,
-                                max_connections=self.s.max_concurrency),
+            limits=httpx.Limits(
+                max_keepalive_connections=self.s.max_concurrency,
+                max_connections=self.s.max_concurrency,
+            ),
         )
         return self
 
@@ -78,17 +96,72 @@ class AsyncHTTP:
         sleep *= 0.5 + random.random()
         await asyncio.sleep(sleep)
 
+    # NEW: try read cached response from disk
+    def _cache_read(self, url: str, params: Dict[str, Any]) -> Optional[httpx.Response]:
+        if not self._cache_dir:
+            return None
+        key = _cache_key(url, params)
+        path = self._cache_dir / f"{key}.bin"
+        meta = self._cache_dir / f"{key}.meta.json"
+        if not path.exists():
+            return None
+        if self._ttl is not None:
+            try:
+                m = json.loads(meta.read_text("utf-8"))
+                if (_now() - float(m.get("ts", 0))) > self._ttl:
+                    return None  # expired
+            except Exception:
+                return None
+        try:
+            data = path.read_bytes()
+            req = httpx.Request("GET", url, params=params, headers={"User-Agent": self.s.user_agent})
+            # Build a Response object as if it came from the network
+            resp = httpx.Response(200, request=req, content=data)
+            # Mark it so you can introspect later if you like
+            resp.extensions["from_cache"] = True
+            return resp
+        except Exception:
+            return None
+
+    # NEW: write response to disk cache
+    def _cache_write(self, url: str, params: Dict[str, Any], resp: httpx.Response) -> None:
+        if not self._cache_dir:
+            return
+        if resp.status_code != 200:
+            return
+        key = _cache_key(url, params)
+        path = self._cache_dir / f"{key}.bin"
+        meta = self._cache_dir / f"{key}.meta.json"
+        try:
+            path.write_bytes(resp.content)
+            meta.write_text(json.dumps({"ts": _now(), "url": url, "params": params}, ensure_ascii=False))
+        except Exception:
+            # best-effort; silence disk races
+            pass
+
     async def get(self, url: str, params: Optional[Dict[str, Any]] = None) -> httpx.Response:
         assert self._client is not None, "Use within 'async with AsyncHTTP(settings)'"
-        await self._limiter.acquire()
         params = params or {}
+
+        # Try cache first
+        if self._cache_dir:
+            cached = self._cache_read(url, params)
+            if cached is not None:
+                # record near-zero latency for metrics
+                await self.metrics.record(0.0)
+                return cached
+
+        # Rate limit + network fetch with retries
+        await self._limiter.acquire()
         for attempt in range(self.s.max_retries + 1):
             t0 = time.perf_counter()
             resp = await self._client.get(url, params=params)
             elapsed = time.perf_counter() - t0
-            if resp.status_code in RETRIABLE:
-                if attempt < self.s.max_retries:
-                    await self._sleep_backoff(attempt)
-                    continue
+            if resp.status_code in RETRIABLE and attempt < self.s.max_retries:
+                await self._sleep_backoff(attempt)
+                continue
             await self.metrics.record(elapsed)
+            # Write to cache on success
+            if resp.status_code == 200:
+                self._cache_write(url, params, resp)
             return resp
