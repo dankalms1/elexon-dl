@@ -13,7 +13,7 @@ SPEC_REGISTRY["isp_stack"] = EndpointSpec(
     time=TimeStrategy(kind="date_sp"),
     items_path="data",
     table="isp_stack",
-    primary_keys=("settlementDate","settlementPeriod","bidOfferType"),
+    primary_keys=("createdDateTime", "sequenceNumber"),
 )
 
 SPEC_REGISTRY["bidoffer_price_acceptances"] = EndpointSpec(
@@ -23,7 +23,7 @@ SPEC_REGISTRY["bidoffer_price_acceptances"] = EndpointSpec(
     time=TimeStrategy(kind="date_sp"),
     items_path="data",
     table="bidoffer_price_acceptances",
-    primary_keys=("settlementDate","settlementPeriod","bmUnitId","acceptanceId"),
+    primary_keys=("acceptanceTime", "bidOfferPairId", "acceptanceNumber"),
     row_filter=exact_sp_filter,
 )
 
@@ -34,7 +34,7 @@ SPEC_REGISTRY["bidoffer_level_acceptances"] = EndpointSpec(
     time=TimeStrategy(kind="date_sp"),
     items_path="data",
     table="bidoffer_level_acceptances",
-    primary_keys=("settlementDate","settlementPeriod","bmUnitId","acceptanceId"),
+    primary_keys=("timeFrom", "timeTo", "acceptanceNumber"),
     row_filter=exact_sp_filter,
 )
 
@@ -45,7 +45,7 @@ SPEC_REGISTRY["dayahead_demand_history"] = EndpointSpec(
     time=TimeStrategy(kind="halfhour_slots"),
     items_path="data",
     table="dayahead_demand_history",
-    primary_keys=("publishTimeEffective","startTime","region"),
+    primary_keys=("publishTimeEffective","startTime"),
     enricher=enrich_publish_effective,
     row_filter=within_dayahead_window,
 )
@@ -83,7 +83,7 @@ SPEC_REGISTRY["agpt"] = EndpointSpec(
     time=TimeStrategy(kind="from_to"),
     items_path="data",
     table="agpt",
-    primary_keys=("publishTime","bmUnitId","startTime"),
+    primary_keys=("startTime","settlementDate","settlementPeriod"),
 )
 
 SPEC_REGISTRY["agws"] = EndpointSpec(
@@ -93,7 +93,7 @@ SPEC_REGISTRY["agws"] = EndpointSpec(
     time=TimeStrategy(kind="from_to"),
     items_path="data",
     table="agws",
-    primary_keys=("publishTime","startTime"),
+    primary_keys=("startTime","settlementDate","settlementPeriod"),
 )
 
 SPEC_REGISTRY["system_prices"] = EndpointSpec(

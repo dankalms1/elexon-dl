@@ -42,7 +42,7 @@ def crawl(
     end_date: str = typer.Option(..., help="YYYY-MM-DD"),
     output_dir: Path = typer.Option(Path("data"), help="Output directory"),
     format: str = typer.Option("json", help="json|csv|parquet"),
-    progress: bool = typer.Option(False, help="Show live progress table"),
+    progress: bool = typer.Option(True, help="Show live progress table"),
     params: List[str] = typer.Argument(None, help="Extra query params as key=value (overrides spec defaults)"),
 ):
     if spec not in SPEC_REGISTRY:
