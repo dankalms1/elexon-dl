@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from .dates import UK
 from itertools import product
 from typing import Any, AsyncIterator, Callable, Dict, Iterable, List, Mapping, Optional
-
 from dateutil.parser import isoparse
+
 
 from .http import AsyncHTTP
 from .dates import settlement_periods_in_day, iso_from_to_for_day
@@ -55,7 +56,9 @@ def _items_from_payload(payload: Mapping[str, Any], items_path: Optional[str]) -
         return []
     if isinstance(items, dict):
         items = list(items.values())
-    return list(items)
+    else:
+        items = list(items)  # copy iterable to avoid mutating original
+    return [item for item in items if isinstance(item, Mapping)]
 
 def _iso_z(dt: datetime) -> str:
     if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
@@ -93,14 +96,18 @@ class SpecCrawler:
             for values in dim_values_product:
                 ctx = dict(base); ctx.update(dict(zip(dim_keys, values)))
                 ctxs.append(ctx)
-        elif t.kind == "publish_slots":
-            for slot in (t.publish_slots or []):
-                pub = datetime.fromisoformat(f"{d.isoformat()}T{slot}:00+00:00").astimezone(timezone.utc)
-                base = {"date": d.isoformat(), "publishTime": _iso_z(pub)}
-                if t.slot_to_sp and slot in t.slot_to_sp:
-                    base["slot_sp"] = t.slot_to_sp[slot]
+        elif t.kind == "publish_slots_fixed_utc":
+            fixed_utc = t.publish_slots or []
+            for hhmm in fixed_utc:
+                hh, mm = map(int, hhmm.split(":"))
+                utc_dt = datetime(d.year, d.month, d.day, hh, mm, tzinfo=timezone.utc)
+                base = {
+                    "date": d.isoformat(),
+                    "publishTime": utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                }
                 for values in dim_values_product:
-                    ctx = dict(base); ctx.update(dict(zip(dim_keys, values)))
+                    ctx = dict(base)
+                    ctx.update(dict(zip(dim_keys, values)))
                     ctxs.append(ctx)
         elif t.kind == "halfhour_slots":
             cur = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)

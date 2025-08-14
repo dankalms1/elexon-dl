@@ -13,17 +13,17 @@ SPEC_REGISTRY["isp_stack"] = EndpointSpec(
     time=TimeStrategy(kind="date_sp"),
     items_path="data",
     table="isp_stack",
-    primary_keys=("date","settlementPeriod","stackComponent","bidOfferType"),
+    primary_keys=("settlementDate","settlementPeriod","bidOfferType"),
 )
 
-SPEC_REGISTRY["acceptances_by_sp"] = EndpointSpec(
-    name="acceptances_by_sp",
+SPEC_REGISTRY["bidoffer_price_acceptances"] = EndpointSpec(
+    name="bidoffer_price_acceptances",
     path_template="/balancing/settlement/acceptances/all/{date}/{sp}",
     query_template={},
     time=TimeStrategy(kind="date_sp"),
     items_path="data",
-    table="acceptances_by_sp",
-    primary_keys=("date","settlementPeriod","bmUnitId","acceptanceId"),
+    table="bidoffer_price_acceptances",
+    primary_keys=("settlementDate","settlementPeriod","bmUnitId","acceptanceId"),
     row_filter=exact_sp_filter,
 )
 
@@ -34,7 +34,7 @@ SPEC_REGISTRY["bidoffer_level_acceptances"] = EndpointSpec(
     time=TimeStrategy(kind="date_sp"),
     items_path="data",
     table="bidoffer_level_acceptances",
-    primary_keys=("date","settlementPeriod","bmUnitId","acceptanceId"),
+    primary_keys=("settlementDate","settlementPeriod","bmUnitId","acceptanceId"),
     row_filter=exact_sp_filter,
 )
 
@@ -53,13 +53,16 @@ SPEC_REGISTRY["dayahead_demand_history"] = EndpointSpec(
 SPEC_REGISTRY["wind_history"] = EndpointSpec(
     name="wind_history",
     path_template="/forecast/generation/wind/history",
-    query_template={"publishTime":"{publishTime}"},
-    time=TimeStrategy(kind="publish_slots",
-                      publish_slots=["03:30","05:30","08:30","10:30","12:30","16:30","19:30","23:30"],
-                      slot_to_sp={"03:30":6,"05:30":10,"08:30":16,"10:30":20,"12:30":24,"16:30":32,"19:30":38,"23:30":46}),
+    query_template={"publishTime": "{publishTime}"},
+    time=TimeStrategy(
+        kind="publish_slots_fixed_utc",
+        publish_slots=["03:30","05:30","08:30","10:30","12:30","16:30","19:30","23:30"],  # UTC
+    ),
     items_path="data",
     table="wind_history",
-    primary_keys=("publishTime","startTime","region"),
+    primary_keys=("publishTime","startTime"),
+    enricher=enrich_publish_effective,     # stamps effective publish time
+    row_filter=within_dayahead_window,     # keep rows in [publish+30m, publish+24h]
 )
 
 SPEC_REGISTRY["wind_evolution"] = EndpointSpec(
@@ -69,7 +72,7 @@ SPEC_REGISTRY["wind_evolution"] = EndpointSpec(
     time=TimeStrategy(kind="halfhour_slots"),
     items_path="data",
     table="wind_evolution",
-    primary_keys=("startTime","publishTime","region"),
+    primary_keys=("startTime","publishTime"),
     row_filter=wind_evolution_top8,
 )
 
@@ -90,7 +93,7 @@ SPEC_REGISTRY["agws"] = EndpointSpec(
     time=TimeStrategy(kind="from_to"),
     items_path="data",
     table="agws",
-    primary_keys=("publishTime","region","startTime"),
+    primary_keys=("publishTime","startTime"),
 )
 
 SPEC_REGISTRY["system_prices"] = EndpointSpec(
@@ -99,7 +102,7 @@ SPEC_REGISTRY["system_prices"] = EndpointSpec(
     time=TimeStrategy(kind="date_only"),
     items_path="data",
     table="system_prices",
-    primary_keys=("date","settlementPeriod","priceType"),
+    primary_keys=("settlementDate","settlementPeriod","priceType"),
 )
 
 SPEC_REGISTRY["demand_outturn"] = EndpointSpec(
@@ -109,7 +112,7 @@ SPEC_REGISTRY["demand_outturn"] = EndpointSpec(
     time=TimeStrategy(kind="date_only"),
     items_path="data",
     table="demand_outturn",
-    primary_keys=("date","settlementPeriod","region"),
+    primary_keys=("settlementDate","settlementPeriod"),
 )
 
 SPEC_REGISTRY["netbsad"] = EndpointSpec(
